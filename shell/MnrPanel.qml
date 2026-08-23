@@ -202,7 +202,7 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.nextTrip ? " " + root.nextTrip.depLabel : " "
+    text: root.nextTrip ? "\uf238 " + root.nextTrip.depLabel : "\uf238 --"
     active: root.nextLate
     dimmed: root.nextTrip === null
     tooltipText: root.okData
@@ -264,7 +264,7 @@ Panel {
             iconOpacity: root.okData ? 1.0 : 0.5
             iconComponent: Component {
               Text {
-                text: ""
+                text: "\uf238"
                 color: root.barForeground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.display
