@@ -393,7 +393,7 @@ Panel {
             spacing: Style.space(8)
 
             PanelSectionHeader {
-              text: "ARRIVING AT  ·  " + root.toName.toUpperCase()
+              text: "ARRIVING FROM  ·  " + root.fromName.toUpperCase()
               foreground: root.barForeground
               fontFamily: root.fontFamily
             }
