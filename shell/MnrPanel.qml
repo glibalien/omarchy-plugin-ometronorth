@@ -255,7 +255,7 @@ Panel {
           // -------------------------------------------------- hero ---
           PanelHero {
             width: parent.width
-            title: "OmiRail"
+            title: "MetroNorth"
             meta: root.okData
               ? root.fromName + "  →  " + root.toName
               : "Metro-North Railroad"
