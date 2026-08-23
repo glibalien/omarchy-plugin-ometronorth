@@ -1,0 +1,297 @@
+#!/usr/bin/env python3
+"""Emit the next Metro-North trains between two stations as one JSON document
+on stdout — one process spawn per refresh, mirroring how erruviel.docker feeds
+its panel. Runs entirely unprivileged and dependency-free: the GTFS-RT feed is
+decoded with a minimal hand-rolled protobuf reader (varint + length-delimited
+fields only), so nothing beyond python3's stdlib is required.
+
+Usage:
+  mnr-panel --from "Grand Central" --to "White Plains" [--api-key KEY]
+  mnr-panel --stations          # list known station names, one per line
+
+The MTA api-endpoint currently serves the feed without a key; if that changes,
+pass one via --api-key or the MNR_API_KEY environment variable (a free key from
+https://api.mta.info). Errors are reported as {"ok": false, ...} on stdout with
+exit code 0 so the QML side always has something parseable.
+"""
+
+import argparse
+import json
+import os
+import sys
+import time
+import urllib.request
+from datetime import datetime
+
+FEED_URL = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/mnr%2Fgtfs-mnr"
+STATIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "stations.json")
+
+ROUTE_NAMES = {
+    "1": "Hudson",
+    "2": "Harlem",
+    "3": "New Haven",
+    "4": "New Canaan",
+    "5": "Danbury",
+    "6": "Waterbury",
+}
+
+# Keep a just-departed train on the board briefly so the bar doesn't flicker
+# at the exact departure minute.
+GRACE_SECONDS = 90
+
+
+# ---------------------------------------------------------------- protobuf ---
+def read_varint(buf, pos):
+    result = 0
+    shift = 0
+    while True:
+        if pos >= len(buf):
+            raise ValueError("truncated varint")
+        b = buf[pos]
+        pos += 1
+        result |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            return result, pos
+        shift += 7
+
+
+def parse_fields(buf):
+    """Decode a protobuf message into {field_number: [values]}.
+
+    Wire type 2 values stay bytes; varints become ints; fixed32/64 stay bytes.
+    Only the field numbers used by GTFS-RT TripUpdate are interpreted later.
+    """
+    out = {}
+    pos = 0
+    while pos < len(buf):
+        key, pos = read_varint(buf, pos)
+        field, wire = key >> 3, key & 7
+        if wire == 0:
+            val, pos = read_varint(buf, pos)
+        elif wire == 1:
+            val = buf[pos:pos + 8]
+            pos += 8
+        elif wire == 5:
+            val = buf[pos:pos + 4]
+            pos += 4
+        elif wire == 2:
+            ln, pos = read_varint(buf, pos)
+            val = buf[pos:pos + ln]
+            pos += ln
+        else:
+            raise ValueError("unsupported wire type %d" % wire)
+        out.setdefault(field, []).append(val)
+    return out
+
+
+def text(msg, field):
+    v = msg.get(field)
+    if not v:
+        return ""
+    try:
+        return v[0].decode("utf-8", "replace")
+    except Exception:
+        return ""
+
+
+# ---------------------------------------------------------------- GTFS-RT ---
+def stop_event(stop_time_update, field):
+    """StopTimeEvent -> (epoch|None, delay_seconds)."""
+    v = stop_time_update.get(field)
+    if not v:
+        return None, 0
+    ev = parse_fields(v[0])
+    delay = ev.get(1, [0])[0]
+    epoch = ev.get(2, [None])[0]
+    return epoch, delay
+
+
+def mnr_extension(stop_time_update):
+    """MNR's extension (field 1005) carries track and a status string such as
+    'On-Time', 'Departed' or 'Arrived'. Repeated across entities, so scan all."""
+    track, status = None, None
+    for blob in stop_time_update.get(1005, []):
+        try:
+            sub = parse_fields(blob)
+        except ValueError:
+            continue
+        t, s = text(sub, 1), text(sub, 2)
+        if t:
+            track = t
+        if s:
+            status = s
+    return track, status
+
+
+def parse_feed(raw):
+    """-> list of trips: {tripId, routeId, stops: [{stopId, arr, arrDelay, dep,
+    depDelay, track, status}] in travel order."""
+    feed = parse_fields(raw)
+    trips = []
+    for entity_blob in feed.get(2, []):
+        entity = parse_fields(entity_blob)
+        for tu_blob in entity.get(3, []):
+            tu = parse_fields(tu_blob)
+            trip = parse_fields(tu.get(1, [b""])[0])
+            stops = []
+            for stu_blob in tu.get(2, []):
+                stu = parse_fields(stu_blob)
+                stop_id = text(stu, 4)
+                if not stop_id:
+                    continue
+                arr, arr_delay = stop_event(stu, 2)
+                dep, dep_delay = stop_event(stu, 3)
+                track, status = mnr_extension(stu)
+                stops.append({
+                    "stopId": stop_id,
+                    "arr": arr,
+                    "arrDelay": arr_delay,
+                    "dep": dep,
+                    "depDelay": dep_delay,
+                    "track": track,
+                    "status": status,
+                })
+            if stops:
+                trips.append({
+                    "tripId": text(trip, 1),
+                    "routeId": text(trip, 5),
+                    "stops": stops,
+                })
+    return trips
+
+
+# ---------------------------------------------------------------- stations ---
+def load_stations():
+    with open(STATIONS_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def resolve_station(query, stations):
+    """Exact (case-insensitive) name or stop id, else a unique substring match."""
+    q = (query or "").strip().lower()
+    if not q:
+        return None, "empty station name"
+    for s in stations:
+        if s["name"].lower() == q or s["id"] == q:
+            return s, None
+    matches = [s for s in stations if q in s["name"].lower()]
+    if len(matches) == 1:
+        return matches[0], None
+    if matches:
+        return None, "ambiguous station '%s' (%s)" % (
+            query, ", ".join(m["name"] for m in matches[:5]))
+    return None, "unknown station '%s' (run with --stations to list)" % query
+
+
+# ------------------------------------------------------------------ report ---
+def fmt_label(epoch):
+    dt = datetime.fromtimestamp(epoch).astimezone()
+    return dt.strftime("%-I:%M") + ("a" if dt.hour < 12 else "p")
+
+
+def fmt_clock(epoch):
+    return datetime.fromtimestamp(epoch).astimezone().strftime("%-I:%M:%S %p")
+
+
+def emit(obj):
+    json.dump(obj, sys.stdout, separators=(",", ":"))
+    sys.stdout.write("\n")
+
+
+def fail(error, hint=""):
+    emit({"ok": False, "error": error, "hint": hint})
+    sys.exit(0)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--from", dest="frm", default="")
+    ap.add_argument("--to", dest="to", default="")
+    ap.add_argument("--api-key", default=os.environ.get("MNR_API_KEY", ""))
+    ap.add_argument("--url", default=FEED_URL)
+    ap.add_argument("--stations", action="store_true")
+    args = ap.parse_args()
+
+    try:
+        stations = load_stations()
+    except OSError as e:
+        fail("stations.json not readable", str(e))
+
+    if args.stations:
+        try:
+            for s in stations:
+                print(s["name"])
+        except BrokenPipeError:
+            pass
+        return
+
+    frm, err = resolve_station(args.frm, stations)
+    if err:
+        fail(err)
+    to, err = resolve_station(args.to, stations)
+    if err:
+        fail(err)
+    if frm["id"] == to["id"]:
+        fail("origin and destination are the same station")
+
+    req = urllib.request.Request(args.url, headers={"User-Agent": "omarchy-mnr/1.0"})
+    if args.api_key:
+        req.add_header("x-api-key", args.api_key)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read()
+    except Exception as e:
+        status = getattr(e, "code", None)
+        hint = ""
+        if status in (401, 403):
+            hint = "The feed refused access. Get a free key at https://api.mta.info and set apiKey."
+        elif status is None:
+            hint = "Network unreachable or DNS failure."
+        fail("feed fetch failed (%s)" % (status or e), hint)
+
+    try:
+        trips = parse_feed(raw)
+    except ValueError as e:
+        fail("feed decode failed", str(e))
+
+    now = time.time()
+    board = []
+    for trip in trips:
+        stops = trip["stops"]
+        idx = {s["stopId"]: i for i, s in enumerate(stops)}
+        i_from = idx.get(frm["id"])
+        i_to = idx.get(to["id"])
+        if i_from is None or i_to is None or i_from >= i_to:
+            continue
+        s_from, s_to = stops[i_from], stops[i_to]
+        dep = s_from["dep"] if s_from["dep"] is not None else s_from["arr"]
+        arr = s_to["arr"] if s_to["arr"] is not None else s_to["dep"]
+        if dep is None or arr is None or dep < now - GRACE_SECONDS:
+            continue
+        board.append({
+            "tripId": trip["tripId"],
+            "routeId": trip["routeId"],
+            "route": ROUTE_NAMES.get(trip["routeId"], trip["routeId"]),
+            "dep": dep,
+            "depDelay": s_from["depDelay"] or s_from["arrDelay"] or 0,
+            "depLabel": fmt_label(dep),
+            "depTrack": s_from["track"] or "",
+            "depStatus": s_from["status"] or "",
+            "arr": arr,
+            "arrDelay": s_to["arrDelay"] or s_to["depDelay"] or 0,
+            "arrLabel": fmt_label(arr),
+        })
+    board.sort(key=lambda t: t["dep"])
+
+    emit({
+        "ok": True,
+        "now": int(now),
+        "updated": fmt_clock(now),
+        "from": frm,
+        "to": to,
+        "trips": board,
+    })
+
+
+if __name__ == "__main__":
+    main()

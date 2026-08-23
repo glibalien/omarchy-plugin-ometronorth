@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "starke.mnr",
+  "name": "OmiRail",
+  "version": "1.0.0",
+  "author": "starke",
+  "license": "MIT",
+  "description": "Next Metro-North trains between two stations for Omarchy",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "shell/MnrPanel.qml"
+  },
+  "barWidget": {
+    "displayName": "OmiRail",
+    "description": "Next Metro-North departures with delay highlighting; popup shows departures and arrivals",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
