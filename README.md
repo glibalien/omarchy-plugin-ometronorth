@@ -21,7 +21,7 @@ it), and a countdown.
 ## Install
 
 ```bash
-omarchy plugin add <this repo URL> --enable
+omarchy plugin add https://github.com/brianstarke/omarchy-plugin-ometronorth --enable
 ```
 
 ## Settings
