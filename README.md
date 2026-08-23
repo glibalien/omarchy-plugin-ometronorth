@@ -7,7 +7,7 @@ and turns red when that train is running late. Click it for a panel with the
 next three departures and, in a separate section, the next three arrivals at
 the destination — each with delay status, route, track (when the feed knows
 it), and a countdown.
-![Expanded panel](preview.png)
+![Expanded panel](preview.png?v=2)
 
 - **Live data** — reads MTA's Metro-North GTFS-RT feed, so times and delays
   are the railroad's own real-time estimates.
