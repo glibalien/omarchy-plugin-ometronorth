@@ -59,6 +59,14 @@ Panel {
   property var stations: []
   property bool queued: false
 
+  // Neutralize rich-text markup in strings that came off the wire or from
+  // the state file before they hit AutoText-formatted sinks.
+  function plain(s) {
+    return String(s === undefined || s === null ? "" : s)
+      .slice(0, 64)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  }
+
   function inMin(epoch) {
     if (!info.now || !epoch) return ""
     var m = Math.round((epoch - info.now) / 60)
@@ -109,8 +117,8 @@ Panel {
     try {
       var s = JSON.parse(raw)
       if (s && typeof s === "object") {
-        if (s.from) overrideFrom = String(s.from)
-        if (s.to) overrideTo = String(s.to)
+        if (typeof s.from === "string") overrideFrom = s.from.slice(0, 64)
+        if (typeof s.to === "string") overrideTo = s.to.slice(0, 64)
         // The startup poll may already have run against the shell.json route;
         // redo it against the restored one.
         refresh()
@@ -164,13 +172,19 @@ Panel {
 
   Process {
     id: stateLoadProc
-    command: ["bash", "-c", "cat \"$1\" 2>/dev/null || true", "bash", root.stateFile]
+    command: ["bash", "-c", "head -c 4096 -- \"$1\" 2>/dev/null || true", "bash", root.stateFile]
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.loadState(text) }
   }
 
+  // Exclusive, no-follow, atomic write: mktemp creates the file O_EXCL 0600
+  // in the state dir and mv renames over the target, so a pre-placed symlink
+  // at stateFile is replaced rather than followed.
   Process {
     id: saveProc
-    command: ["bash", "-c", "mkdir -p \"$1\" && printf '%s' \"$2\" > \"$3\"",
+    command: ["bash", "-c",
+              "mkdir -p \"$1\" && tmp=$(mktemp \"$1/.ometronorth.XXXXXX\")" +
+              " && { printf '%s' \"$2\" > \"$tmp\" && mv -f -- \"$tmp\" \"$3\"; }" +
+              " || { rm -f -- \"$tmp\"; exit 1; }",
               "bash", root.stateDir,
               JSON.stringify({ from: root.fromName, to: root.toName }),
               root.stateFile]
@@ -206,7 +220,7 @@ Panel {
     active: root.nextLate
     dimmed: root.nextTrip === null
     tooltipText: root.okData
-      ? root.fromName + " → " + root.toName
+      ? plain(root.fromName) + " → " + plain(root.toName)
       : (root.errorText || "Metro-North: loading…")
     onPressed: function(b) {
       if (b === Qt.MiddleButton) root.refresh()
@@ -257,7 +271,7 @@ Panel {
             width: parent.width
             title: "MetroNorth"
             meta: root.okData
-              ? root.fromName + "  →  " + root.toName
+              ? plain(root.fromName) + "  →  " + plain(root.toName)
               : "Metro-North Railroad"
             foreground: root.barForeground
             fontFamily: root.fontFamily
@@ -288,6 +302,7 @@ Panel {
             width: parent.width
             wrapMode: Text.WordWrap
             text: root.errorText + (root.hintText !== "" ? "\n" + root.hintText : "")
+            textFormat: Text.PlainText
             color: root.urgent
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -365,7 +380,7 @@ Panel {
             spacing: Style.space(8)
 
             PanelSectionHeader {
-              text: "DEPARTURES  ·  " + root.fromName.toUpperCase()
+              text: "DEPARTURES  ·  " + plain(root.fromName.toUpperCase())
               foreground: root.barForeground
               fontFamily: root.fontFamily
             }
@@ -393,7 +408,7 @@ Panel {
             spacing: Style.space(8)
 
             PanelSectionHeader {
-              text: "ARRIVING FROM  ·  " + root.toName.toUpperCase()
+              text: "ARRIVING FROM  ·  " + plain(root.toName.toUpperCase())
               foreground: root.barForeground
               fontFamily: root.fontFamily
             }
@@ -414,7 +429,8 @@ Panel {
             visible: root.okData && root.trips.length === 0
             width: parent.width
             wrapMode: Text.WordWrap
-            text: "No upcoming trains from " + root.fromName + " to " + root.toName +
+            textFormat: Text.PlainText
+            text: "No upcoming trains from " + plain(root.fromName) + " to " + plain(root.toName) +
                   ". Late at night the feed may have nothing scheduled yet."
             color: root.dim
             font.family: root.fontFamily
@@ -425,7 +441,8 @@ Panel {
           Text {
             visible: root.okData
             width: parent.width
-            text: "Updated " + (root.info.updated || "") + "  ·  MTA GTFS-RT"
+            text: "Updated " + (plain(root.info.updated)) + "  ·  MTA GTFS-RT"
+            textFormat: Text.PlainText
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -460,6 +477,7 @@ Panel {
       Text {
         text: trow.label
         color: trow.late ? root.urgent : root.barForeground
+        textFormat: Text.PlainText
         font.family: root.fontFamily
         font.pixelSize: Style.font.body
         font.bold: true
@@ -468,8 +486,9 @@ Panel {
       Text {
         width: parent.width
         elide: Text.ElideRight
-        text: (trow.trip.route || "") +
-              (!trow.arrival && trow.trip.depTrack ? "  ·  Track " + trow.trip.depTrack : "")
+        textFormat: Text.PlainText
+        text: plain(trow.trip.route) +
+              (!trow.arrival && trow.trip.depTrack ? "  ·  Track " + plain(trow.trip.depTrack) : "")
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -485,6 +504,7 @@ Panel {
       Text {
         anchors.right: parent.right
         text: root.statusFor(trow.trip, trow.arrival)
+        textFormat: Text.PlainText
         color: trow.late ? root.urgent : root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -494,6 +514,7 @@ Panel {
       Text {
         anchors.right: parent.right
         text: root.inMin(trow.epoch)
+        textFormat: Text.PlainText
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption

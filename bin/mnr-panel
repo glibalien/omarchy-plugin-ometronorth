@@ -38,6 +38,16 @@ ROUTE_NAMES = {
 # Keep a just-departed train on the board briefly so the bar doesn't flicker
 # at the exact departure minute.
 GRACE_SECONDS = 90
+# Producer-side ceilings. The feed is attacker-influenceable input, so bound
+# every stage: response bytes, decoded records, per-field values, string
+# lengths, and the emitted board (which also caps our own stdout).
+MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+MAX_FEED_ENTITIES = 4096
+MAX_TRIP_UPDATES_PER_ENTITY = 64
+MAX_STOPS_PER_TRIP = 256
+MAX_FIELD_VALUES = 4096
+MAX_TEXT_LEN = 64
+MAX_BOARD = 32
 
 
 # ---------------------------------------------------------------- protobuf ---
@@ -80,7 +90,9 @@ def parse_fields(buf):
             pos += ln
         else:
             raise ValueError("unsupported wire type %d" % wire)
-        out.setdefault(field, []).append(val)
+        values = out.setdefault(field, [])
+        if len(values) < MAX_FIELD_VALUES:
+            values.append(val)
     return out
 
 
@@ -89,7 +101,7 @@ def text(msg, field):
     if not v:
         return ""
     try:
-        return v[0].decode("utf-8", "replace")
+        return v[0][:MAX_TEXT_LEN].decode("utf-8", "replace")
     except Exception:
         return ""
 
@@ -128,13 +140,13 @@ def parse_feed(raw):
     depDelay, track, status}] in travel order."""
     feed = parse_fields(raw)
     trips = []
-    for entity_blob in feed.get(2, []):
+    for entity_blob in feed.get(2, [])[:MAX_FEED_ENTITIES]:
         entity = parse_fields(entity_blob)
-        for tu_blob in entity.get(3, []):
+        for tu_blob in entity.get(3, [])[:MAX_TRIP_UPDATES_PER_ENTITY]:
             tu = parse_fields(tu_blob)
             trip = parse_fields(tu.get(1, [b""])[0])
             stops = []
-            for stu_blob in tu.get(2, []):
+            for stu_blob in tu.get(2, [])[:MAX_STOPS_PER_TRIP]:
                 stu = parse_fields(stu_blob)
                 stop_id = text(stu, 4)
                 if not stop_id:
@@ -239,7 +251,9 @@ def main():
         req.add_header("x-api-key", args.api_key)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read()
+            raw = resp.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                fail("feed response exceeds %d byte ceiling" % MAX_RESPONSE_BYTES)
     except Exception as e:
         status = getattr(e, "code", None)
         hint = ""
@@ -282,6 +296,7 @@ def main():
             "arrLabel": fmt_label(arr),
         })
     board.sort(key=lambda t: t["dep"])
+    del board[MAX_BOARD:]
 
     emit({
         "ok": True,
