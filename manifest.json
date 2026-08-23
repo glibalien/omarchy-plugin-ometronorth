@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "starke.mnr",
-  "name": "OmiRail",
+  "id": "brianstarke.ometronorth",
+  "name": "OmetroNorth",
   "version": "1.0.0",
   "author": "starke",
   "license": "MIT",
@@ -13,10 +13,10 @@
     "barWidget": "shell/MnrPanel.qml"
   },
   "barWidget": {
-    "displayName": "OmiRail",
+    "displayName": "OmetroNorth",
     "description": "Next Metro-North departures with delay highlighting; popup shows departures and arrivals",
     "category": "System",
     "allowMultiple": false,
-    "defaultSection": "right"
+    "defaultSection": "center"
   }
 }

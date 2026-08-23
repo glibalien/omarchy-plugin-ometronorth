@@ -1,4 +1,4 @@
-# OmiRail
+# OmetroNorth
 
 Next MTA Metro-North trains on the [Omarchy](https://omarchy.org) bar.
 
@@ -37,11 +37,11 @@ In `~/.config/omarchy/shell.json`, on the widget entry:
 | `lateMinutes` | `5` | Delay threshold in minutes before a train counts as late (and turns red). |
 
 ```json
-{ "id": "starke.mnr", "from": "Grand Central", "to": "Croton-Harmon", "lateMinutes": 3 }
+{ "id": "brianstarke.ometronorth", "from": "Grand Central", "to": "Croton-Harmon", "lateMinutes": 3 }
 ```
 
 Stations picked in the panel are saved to
-`~/.local/state/omarchy/starke.mnr.json` and take precedence over `from`/`to`
+`~/.local/state/omarchy/brianstarke.ometronorth.json` and take precedence over `from`/`to`
 until you pick again. Delete that file to fall back to the settings.
 
 ## Keys
@@ -53,7 +53,7 @@ fully keyboard-driven (type to filter, arrows to move, Enter to select).
 ## Uninstall
 
 ```bash
-omarchy plugin remove starke.mnr
+omarchy plugin remove brianstarke.ometronorth
 ```
 
 ## License

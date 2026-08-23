@@ -14,12 +14,12 @@ import qs.Ui
 //
 // Everything runs unprivileged. The only dependency is python3's stdlib; the
 // GTFS-RT protobuf is decoded by the helper itself. Station picks made in the
-// panel persist to ~/.local/state/omarchy/starke.mnr.json and override the
+// panel persist to ~/.local/state/omarchy/brianstarke.ometronorth.json and override the
 // shell.json `from`/`to` settings until changed again.
 Panel {
   id: root
-  moduleName: "starke.mnr"
-  ipcTarget: "starke.mnr"
+  moduleName: "brianstarke.ometronorth"
+  ipcTarget: "brianstarke.ometronorth"
 
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color dim: Qt.darker(barForeground, 1.4)
@@ -30,7 +30,7 @@ Panel {
   // `omarchy plugin add` with nothing installed on PATH.
   readonly property string panelScript: Qt.resolvedUrl("../bin/mnr-panel").toString().replace(/^file:\/\//, "")
   readonly property string stateDir: Quickshell.env("HOME") + "/.local/state/omarchy"
-  readonly property string stateFile: stateDir + "/starke.mnr.json"
+  readonly property string stateFile: stateDir + "/brianstarke.ometronorth.json"
 
   // ------------------------------------------------------------- settings ---
   readonly property string cfgFrom: String(setting("from", "Grand Central"))
