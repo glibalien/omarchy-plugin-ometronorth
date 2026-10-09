@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emit the next Metro-North trains between two stations as one JSON document
+"""Emit the next Metro-North trains for a station pair or an Anywhere route
 on stdout — one process spawn per refresh, mirroring how erruviel.docker feeds
 its panel. Runs entirely unprivileged and dependency-free: the GTFS-RT feed is
 decoded with a minimal hand-rolled protobuf reader (varint + length-delimited
@@ -7,6 +7,8 @@ fields only), so nothing beyond python3's stdlib is required.
 
 Usage:
   mnr-panel --from "Grand Central" --to "White Plains" [--api-key KEY]
+  mnr-panel --from "Grand Central" --to Anywhere
+  mnr-panel --from Anywhere --to "White Plains"
   mnr-panel --stations          # list known station names, one per line
 
 The MTA api-endpoint currently serves the feed without a key; if that changes,
@@ -183,6 +185,8 @@ def resolve_station(query, stations):
     q = (query or "").strip().lower()
     if not q:
         return None, "empty station name"
+    if q == "anywhere":
+        return {"id": "*", "name": "Anywhere"}, None
     for s in stations:
         if s["name"].lower() == q or s["id"] == q:
             return s, None
@@ -231,6 +235,7 @@ def main():
 
     if args.stations:
         try:
+            print("Anywhere")
             for s in stations:
                 print(s["name"])
         except BrokenPipeError:
@@ -243,6 +248,8 @@ def main():
     to, err = resolve_station(args.to, stations)
     if err:
         fail(err)
+    if frm["id"] == "*" and to["id"] == "*":
+        fail("select at least one station for an Anywhere route")
     if frm["id"] == to["id"]:
         fail("origin and destination are the same station")
 
@@ -270,22 +277,28 @@ def main():
 
     now = time.time()
     board = []
+    station_names = {s["id"]: s["name"] for s in stations}
+    arrivals_mode = frm["id"] == "*"
     for trip in trips:
         stops = trip["stops"]
         idx = {s["stopId"]: i for i, s in enumerate(stops)}
-        i_from = idx.get(frm["id"])
-        i_to = idx.get(to["id"])
+        i_from = 0 if arrivals_mode else idx.get(frm["id"])
+        i_to = len(stops) - 1 if to["id"] == "*" else idx.get(to["id"])
         if i_from is None or i_to is None or i_from >= i_to:
             continue
         s_from, s_to = stops[i_from], stops[i_to]
         dep = s_from["dep"] if s_from["dep"] is not None else s_from["arr"]
         arr = s_to["arr"] if s_to["arr"] is not None else s_to["dep"]
-        if dep is None or arr is None or dep < now - GRACE_SECONDS:
+        if dep is None or arr is None:
+            continue
+        if (arr if arrivals_mode else dep) < now - GRACE_SECONDS:
             continue
         board.append({
             "tripId": trip["tripId"],
             "routeId": trip["routeId"],
             "route": ROUTE_NAMES.get(trip["routeId"], trip["routeId"]),
+            "fromName": station_names.get(s_from["stopId"], s_from["stopId"]),
+            "toName": station_names.get(s_to["stopId"], s_to["stopId"]),
             "dep": dep,
             "depDelay": s_from["depDelay"] or s_from["arrDelay"] or 0,
             "depLabel": fmt_label(dep),
@@ -295,7 +308,7 @@ def main():
             "arrDelay": s_to["arrDelay"] or s_to["depDelay"] or 0,
             "arrLabel": fmt_label(arr),
         })
-    board.sort(key=lambda t: t["dep"])
+    board.sort(key=lambda t: t["arr"] if arrivals_mode else t["dep"])
     del board[MAX_BOARD:]
 
     emit({

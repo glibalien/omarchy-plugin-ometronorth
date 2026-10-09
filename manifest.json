@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "starke",
   "license": "MIT",
-  "description": "Next Metro-North trains between two stations for Omarchy",
+  "description": "Next Metro-North trains between two stations or to/from anywhere for Omarchy",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "OmetroNorth",
-    "description": "Next Metro-North departures with delay highlighting; popup shows departures and arrivals",
+    "description": "Next Metro-North departures or arrivals with delay highlighting and Anywhere station selection",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "center"

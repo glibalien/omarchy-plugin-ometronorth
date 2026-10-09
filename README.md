@@ -6,13 +6,15 @@ The bar shows the time of the next train from your origin to your destination,
 and turns red when that train is running late. Click it for a panel with the
 next three departures and, in a separate section, the next three arrivals at
 the destination — each with delay status, route, track (when the feed knows
-it), and a countdown.
+it), and a countdown. Pick **Anywhere** as the destination to see the next
+trains leaving one station, or as the origin to see the next trains arriving
+at one station. In either view, each row names the other endpoint.
 ![Expanded panel](preview.png?v=2)
 
 - **Live data** — reads MTA's Metro-North GTFS-RT feed, so times and delays
   are the railroad's own real-time estimates.
 - **Configurable route** — pick origin and destination from a searchable list
-  of every Metro-North station right in the panel (or pin them in settings).
+  of every Metro-North station plus Anywhere right in the panel (or pin them in settings).
   A swap button flips the commute for the ride home.
 - **Late means red** — the bar time and the panel rows highlight once a train
   is at least `lateMinutes` behind.
@@ -31,8 +33,8 @@ In `~/.config/omarchy/shell.json`, on the widget entry:
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `from` | `"Grand Central"` | Origin station. Any name from the station list (also accept stop ids); unique substrings work too. |
-| `to` | `"White Plains"` | Destination station. |
+| `from` | `"Grand Central"` | Origin station, or `"Anywhere"` for the next arrivals at `to`. Station names and stop ids work; unique substrings work too. |
+| `to` | `"White Plains"` | Destination station, or `"Anywhere"` for the next departures from `from`. At least one side must be a station. |
 | `apiKey` | `""` | MTA API key from <https://api.mta.info>. The feed currently answers without one; set this if that changes or you hit rate limits. |
 | `interval` | `60` | Background poll interval in seconds while the panel is closed (minimum 30). The open panel polls every 15 s. |
 | `lateMinutes` | `5` | Delay threshold in minutes before a train counts as late (and turns red). |
@@ -40,6 +42,11 @@ In `~/.config/omarchy/shell.json`, on the widget entry:
 ```json
 { "id": "brianstarke.ometronorth", "from": "Grand Central", "to": "Croton-Harmon", "lateMinutes": 3 }
 ```
+
+For an arrivals board, set `"from": "Anywhere"` and choose a station for
+`to`. For a departures board, choose a station for `from` and set
+`"to": "Anywhere"`. The bar and panel use arrival times for the former and
+departure times for the latter.
 
 Stations picked in the panel are saved to
 `~/.local/state/omarchy/brianstarke.ometronorth.json` and take precedence over `from`/`to`

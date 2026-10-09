@@ -50,8 +50,12 @@ Panel {
   property var info: ({})
   readonly property bool okData: info.ok === true
   readonly property var trips: okData ? (info.trips || []) : []
+  readonly property bool arrivalMode: okData && info.from && info.from.id === "*"
+  readonly property bool anywhereMode: okData &&
+    ((info.from && info.from.id === "*") || (info.to && info.to.id === "*"))
   readonly property var nextTrip: trips.length > 0 ? trips[0] : null
-  readonly property bool nextLate: nextTrip !== null && (nextTrip.depDelay || 0) >= lateMinutes * 60
+  readonly property bool nextLate: nextTrip !== null &&
+    (arrivalMode ? (nextTrip.arrDelay || 0) : (nextTrip.depDelay || 0)) >= lateMinutes * 60
   readonly property string errorText: okData ? "" : (info.error || "")
   readonly property string hintText: okData ? "" : (info.hint || "")
   readonly property bool pickerOpen: fromDrop.popupOpen || toDrop.popupOpen
@@ -216,7 +220,9 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.nextTrip ? "\uf238 " + root.nextTrip.depLabel : "\uf238 --"
+    text: root.nextTrip
+      ? "\uf238 " + (root.arrivalMode ? root.nextTrip.arrLabel : root.nextTrip.depLabel)
+      : "\uf238 --"
     active: root.nextLate
     dimmed: root.nextTrip === null
     tooltipText: root.okData
@@ -380,7 +386,8 @@ Panel {
             spacing: Style.space(8)
 
             PanelSectionHeader {
-              text: "DEPARTURES  ·  " + plain(root.fromName.toUpperCase())
+              text: (root.arrivalMode ? "ARRIVALS  ·  " + plain(root.toName.toUpperCase())
+                                      : "DEPARTURES  ·  " + plain(root.fromName.toUpperCase()))
               foreground: root.barForeground
               fontFamily: root.fontFamily
             }
@@ -391,19 +398,19 @@ Panel {
                 required property var modelData
                 width: parent.width
                 trip: modelData
-                arrival: false
+                arrival: root.arrivalMode
               }
             }
           }
 
           // ------------------------------------------------ arrivals ---
           PanelSeparator {
-            visible: root.trips.length > 0
+            visible: root.trips.length > 0 && !root.anywhereMode
             foreground: root.barForeground
           }
 
           Column {
-            visible: root.trips.length > 0
+            visible: root.trips.length > 0 && !root.anywhereMode
             width: parent.width
             spacing: Style.space(8)
 
@@ -487,7 +494,11 @@ Panel {
         width: parent.width
         elide: Text.ElideRight
         textFormat: Text.PlainText
-        text: plain(trow.trip.route) +
+        text: (root.anywhereMode
+                ? (trow.arrival ? "From " + plain(trow.trip.fromName) + "  ·  "
+                                : "To " + plain(trow.trip.toName) + "  ·  ")
+                : "") +
+              plain(trow.trip.route) +
               (!trow.arrival && trow.trip.depTrack ? "  ·  Track " + plain(trow.trip.depTrack) : "")
         color: root.dim
         font.family: root.fontFamily
